@@ -1,0 +1,359 @@
+#Contains functions used to generate PRIS statistics for either a specific FY or at the current time when the PRIS report is generated
+
+import pandas as pd
+import numpy as np
+from datetime import datetime
+from dateutil.relativedelta import relativedelta
+
+# converts serial date (ex: 20210104) to datetime date (ex 2021-01-04 00:00:00:00)
+# serial dates consisting of only a year are converted to 9/30 of that year (ie  last day of fiscal year)
+def serial_to_date(serial):
+    if len(serial) == 8:
+        return serial[4:6] + '/' + serial[6:8] + '/' + serial[:4]
+    else:
+        return '9/30/' + serial[:4]
+
+# generates excel sheet of PRIS statistics for given fiscal year
+def generate_fy_sheet(fy, input_file, writer):
+    fy_end = datetime(fy, 9, 30, 23, 59, 59)
+    fy_start = datetime(fy - 1, 10, 1)
+
+    df = pd.read_csv(input_file)
+
+    # convert dataframe dates to datetimes
+    df['CREATION_DATETIME'] = df.apply(lambda row: serial_to_date(str(row['YEAR'])), axis=1)
+    df['CREATION_DATETIME'] = pd.to_datetime(df['CREATION_DATETIME'], errors='coerce')
+    df['ACTUAL_COMPLETE_DATETIME'] = pd.to_datetime(df['ACTUAL_COMPLETE_DATE'], errors='coerce')
+    df['STATUS_UPDATE_DATETIME'] = pd.to_datetime(df['STATUS_UPDATE_DATE'], errors='coerce')
+    df['TARGET_COMPLETE_DATETIME'] = pd.to_datetime(df['TARGET_COMPLETE_DATE'], errors='coerce')
+
+    # create list of unique facilities and categories for summing/labeling recommendation counts
+    facilities = np.sort(df.FAC_NAME.unique())
+    categories = np.sort(df.CATEGORY.unique())
+
+    # create empty dataframe PRIS recommendation statistics
+    # add column of facility names to PRIS report dataframe to contain recommendation counts per facility
+    pris_report = pd.DataFrame()
+    pris_report['Facility'] = facilities
+
+    # create empty dataframe to contain count totals for each column of the PRIS recommendation report
+    # this dataframe will be appended as the last row of the PRIS recommendation report, so it needs to have column names
+    # that match the column names of the PRIS recommendation report dataframe
+    pris_report_totals = pd.DataFrame()
+    pris_report_totals['Facility'] = ['Total']
+
+    # The next several blocks are used to populate PRIS recommendation statistics for different constraints
+    # Incomplete @ FY End
+    for category in categories:
+        count = []
+        for facility in facilities:
+            count.append(len(df[
+                                 ((df['FAC_NAME'] == facility) & (df['CATEGORY'] == category) & (
+                                             df['CREATION_DATETIME'] < fy_end)) &
+                                 (((df['ACTUAL_COMPLETE_DATETIME'] != 'NaT') & (
+                                             df['ACTUAL_COMPLETE_DATETIME'] > fy_end)) |
+                                  ((df['ACTUAL_COMPLETE_DATETIME'] == 'NaT') & (df['STATUS'] == 'COMPLETE') & (
+                                              df['STATUS_UPDATE_DATETIME'] > fy_end)) |
+                                  ((df['STATUS'] == 'DELETED') & (df['STATUS_UPDATE_DATETIME'] > fy_end)) |
+                                  (df['STATUS'] == 'INCOMPLETE'))
+                                 ]))
+        header_string = 'Incomplete CAT ' + str(category) + ' @FY End'
+        pris_report[header_string] = np.array(count)
+        pris_report_totals[header_string] = sum(np.array(count))
+
+    # Incomplete @ FY Start
+    for category in categories:
+        count = []
+        for facility in facilities:
+            count.append(len(df[
+                                 ((df['FAC_NAME'] == facility) & (df['CATEGORY'] == category) & (
+                                             df['CREATION_DATETIME'] < fy_start)) &
+                                 (((df['ACTUAL_COMPLETE_DATETIME'] != 'NaT') & (
+                                             df['ACTUAL_COMPLETE_DATETIME'] > fy_start)) |
+                                  ((df['ACTUAL_COMPLETE_DATETIME'] == 'NaT') & (df['STATUS'] == 'COMPLETE') & (
+                                              df['STATUS_UPDATE_DATETIME'] > fy_start)) |
+                                  ((df['STATUS'] == 'DELETED') & (df['STATUS_UPDATE_DATETIME'] > fy_start)) |
+                                  (df['STATUS'] == 'INCOMPLETE'))
+                                 ]))
+        header_string = 'Incomplete CAT ' + str(category) + ' @FY Start'
+        pris_report[header_string] = np.array(count)
+        pris_report_totals[header_string] = sum(np.array(count))
+
+    # Incomplete @ FY Start & Completion Scheduled in FY
+    for category in categories:
+        count = []
+        for facility in facilities:
+            count.append(len(df[
+                                 ((df['FAC_NAME'] == facility) & (df['CATEGORY'] == category) & (
+                                             df['CREATION_DATETIME'] < fy_start) &
+                                  (df['TARGET_COMPLETE_DATETIME'] > fy_start) & (
+                                              df['TARGET_COMPLETE_DATETIME'] < fy_end)) &
+                                 (((df['ACTUAL_COMPLETE_DATETIME'] != 'NaT') & (
+                                             df['ACTUAL_COMPLETE_DATETIME'] > fy_start)) |
+                                  ((df['ACTUAL_COMPLETE_DATETIME'] == 'NaT') & (df['STATUS'] == 'COMPLETE') & (
+                                              df['STATUS_UPDATE_DATETIME'] > fy_start)) |
+                                  ((df['STATUS'] == 'DELETED') & (df['STATUS_UPDATE_DATETIME'] > fy_start)) |
+                                  (df['STATUS'] == 'INCOMPLETE'))
+                                 ]))
+        header_string = 'Incomplete CAT ' + str(category) + ' @FY Start & Completion Scheduled in FY'
+        pris_report[header_string] = np.array(count)
+        pris_report_totals[header_string] = sum(np.array(count))
+
+    # Created in FY
+    for category in categories:
+        count = []
+        for facility in facilities:
+            count.append(len(df[
+                                 ((df['FAC_NAME'] == facility) & (df['CATEGORY'] == category)) &
+                                 ((df['CREATION_DATETIME'] > fy_start) & (df['CREATION_DATETIME'] < fy_end))]))
+        header_string = 'CAT ' + str(category) + ' Created in FY'
+        pris_report[header_string] = np.array(count)
+        pris_report_totals[header_string] = sum(np.array(count))
+
+    # Completed within FY
+    for category in categories:
+        count = []
+        for facility in facilities:
+            count.append(len(df[
+                                 ((df['FAC_NAME'] == facility) & (df['CATEGORY'] == category)) &
+                                 ((df['ACTUAL_COMPLETE_DATETIME'] != 'NaT') & (
+                                             df['ACTUAL_COMPLETE_DATETIME'] > fy_start) & (
+                                              df['ACTUAL_COMPLETE_DATETIME'] < fy_end)) |
+                                 ((df['ACTUAL_COMPLETE_DATETIME'] == 'NaT') & (df['STATUS'] == 'COMPLETE') & (
+                                             df['STATUS_UPDATE_DATETIME'] > fy_start) & (
+                                              df['STATUS_UPDATE_DATETIME'] < fy_end))
+                                 ]))
+        header_string = 'CAT ' + str(category) + ' Completed in FY'
+        pris_report[header_string] = np.array(count)
+        pris_report_totals[header_string] = sum(np.array(count))
+
+    # Deleted within FY
+    for category in categories:
+        count = []
+        for facility in facilities:
+            count.append(len(df[
+                                 ((df['FAC_NAME'] == facility) & (df['CATEGORY'] == category) & (df['STATUS'] == 'DELETED')) &
+                                    ((df['STATUS_UPDATE_DATETIME'] > fy_start) & (df['STATUS_UPDATE_DATETIME'] < fy_end))
+                                 ]))
+        header_string = 'CAT ' + str(category) + ' Deleted in FY'
+        pris_report[header_string] = np.array(count)
+        pris_report_totals[header_string] = sum(np.array(count))
+
+
+    # combine dataframe for facilities with dataframe for totals
+    pris_report = pd.concat([pris_report, pris_report_totals], ignore_index=True)
+
+
+    # Convert the dataframe to an XlsxWriter Excel object.  Note that we turn off
+    # the default header and skip one row to allow us to insert a user defined
+    # header because xlsxwriter cannot override formatting of dataframe
+    pris_report.to_excel(writer, sheet_name='FY' + str(fy), startrow=1, index=False, header=False)
+
+    # Get the xlsxwriter workbook and worksheet objects.
+    workbook = writer.book
+    worksheet = writer.sheets['FY' + str(fy)]
+
+    # format header
+    # couldn't format via applymap_index because formatting options for it are very limited
+    # to get around this, header is omitted when dataframe is exported to excel
+    # and rewritten outside of the pandas dataframe
+    format_header = workbook.add_format({
+        'color': 'white',
+        'bold': True,
+        'text_wrap': True,
+        'valign': 'bottom',
+        'fg_color': '#6099F6',
+        'border': 1})
+
+    # Write the column headers with the defined format.
+    for col_num, value in enumerate(pris_report.columns.values):
+        worksheet.write(0, col_num, value, format_header)
+
+    worksheet.set_column(1, 30, 10)
+
+def generate_current_sheet(input_file, writer):
+
+    df = pd.read_csv(input_file)
+
+    # convert dataframe dates to datetimes
+    df['CREATION_DATETIME'] = df.apply(lambda row: serial_to_date(str(row['YEAR'])), axis=1)
+    df['CREATION_DATETIME'] = pd.to_datetime(df['CREATION_DATETIME'], errors='coerce')
+    df['ACTUAL_COMPLETE_DATETIME'] = pd.to_datetime(df['ACTUAL_COMPLETE_DATE'], errors='coerce')
+    df['STATUS_UPDATE_DATETIME'] = pd.to_datetime(df['STATUS_UPDATE_DATE'], errors='coerce')
+    df['TARGET_COMPLETE_DATETIME'] = pd.to_datetime(df['TARGET_COMPLETE_DATE'], errors='coerce')
+
+    # create list of unique facilities and categories for summing/labeling recommendation counts
+    facilities = np.sort(df.FAC_NAME.unique())
+    categories = np.sort(df.CATEGORY.unique())
+
+    # create empty dataframe PRIS recommendation statistics
+    # add column of facility names to PRIS report dataframe to contain recommendation counts per facility
+    pris_report = pd.DataFrame()
+    pris_report['Facility'] = facilities
+
+    # create empty dataframe to contain count totals for each column of the PRIS recommendation report
+    # this dataframe will be appended as the last row of the PRIS recommendation report, so it needs to have column names
+    # that match the column names of the PRIS recommendation report dataframe
+    pris_report_totals = pd.DataFrame()
+    pris_report_totals['Facility'] = ['Total']
+
+     # Current Incomplete
+    for category in categories:
+        count = []
+        for facility in facilities:
+            count.append(len(df[
+                                 ((df['FAC_NAME'] == facility) & (df['CATEGORY'] == category) &
+                                  (df['STATUS'] == 'INCOMPLETE'))
+                             ]))
+        header_string = 'Current Incomplete CAT ' + str(category)
+        pris_report[header_string] = np.array(count)
+        pris_report_totals[header_string] = sum(np.array(count))
+
+    # Current Incomplete CAT 1 > 1 year or missing estimated completion date
+    count = []
+    for facility in facilities:
+        count.append(len(df[
+                             ((df['FAC_NAME'] == facility) & (df['CATEGORY'] == 1) & (df['STATUS'] == 'INCOMPLETE')) &
+                             ((df['CREATION_DATETIME'] < (pd.to_datetime('today') + relativedelta(years=-1))) |
+                              (df['TARGET_COMPLETE_DATETIME'] == 'NaT'))
+                             ]))
+    header_string = 'Current Incomplete CAT 1 > 1 year or missing estimated completion date'
+    pris_report[header_string] = np.array(count)
+    pris_report_totals[header_string] = sum(np.array(count))
+
+    # Current Incomplete CAT 1 w/ expired estimated completion date
+    count = []
+    for facility in facilities:
+        count.append(len(df[
+                             ((df['FAC_NAME'] == facility) & (df['CATEGORY'] == 1) & (df['STATUS'] == 'INCOMPLETE')) &
+                             (df['TARGET_COMPLETE_DATETIME'] < pd.to_datetime('today'))
+                             ]))
+    header_string = 'Current Incomplete CAT 1 w/ expired estimated completion date'
+    pris_report[header_string] = np.array(count)
+    pris_report_totals[header_string] = sum(np.array(count))
+
+    # Current Incomplete CAT 2 w/ Updated Cost & Schedule
+    count = []
+    for facility in facilities:
+        count.append(len(df[
+                             (df['FAC_NAME'] == facility) & (df['CATEGORY'] == 2) & (df['STATUS'] == 'INCOMPLETE') &
+                             (df['EST_COMP_COST'] != 'nan') & (df['TARGET_COMPLETE_DATETIME'] != 'NaT') & (
+                                         df['TARGET_COMPLETE_DATETIME'] > pd.to_datetime('today'))
+                             ]))
+    header_string = 'Current Incomplete CAT 2 w/ Updated Cost & Schedule'
+    pris_report[header_string] = np.array(count)
+    pris_report_totals[header_string] = sum(np.array(count))
+
+    # Current % Incomplete CAT 2 w/ Updated Cost & Schedule
+    header_string = 'Current % Incomplete CAT 2 w/ Updated Cost & Schedule'
+    pris_report[header_string] = pris_report.apply(lambda row: 0 if row['Current Incomplete CAT 2'] == 0
+    else round(row['Current Incomplete CAT 2 w/ Updated Cost & Schedule'] / row['Current Incomplete CAT 2'] * 100),
+                                                   axis=1)
+    pris_report_totals[header_string] = round(
+        pris_report_totals['Current Incomplete CAT 2 w/ Updated Cost & Schedule'] / pris_report_totals[
+            'Current Incomplete CAT 2'] * 100)
+
+    # Current Incomplete CAT 2 5-10 years old
+    count = []
+    for facility in facilities:
+        count.append((len(df[
+                              (df['FAC_NAME'] == facility) & (df['CATEGORY'] == 2) & (df['STATUS'] == 'INCOMPLETE') &
+                              (df['CREATION_DATETIME'] < pd.to_datetime('today') + relativedelta(years=-5)) &
+                              (df['CREATION_DATETIME'] > pd.to_datetime('today') + relativedelta(years=-10))
+                              ])))
+    header_string = 'Current Incomplete CAT 2 5-10 years old'
+    pris_report[header_string] = np.array(count)
+    pris_report_totals[header_string] = sum(np.array(count))
+
+    # Current % Incomplete CAT 2 5-10 years old
+    header_string = 'Current % Incomplete CAT 2 5-10 years old'
+    pris_report[header_string] = pris_report.apply(lambda row: 0 if row['Current Incomplete CAT 2'] == 0
+    else round(row['Current Incomplete CAT 2 5-10 years old'] / row['Current Incomplete CAT 2'] * 100), axis=1)
+    pris_report_totals[header_string] = round(
+        pris_report_totals['Current Incomplete CAT 2 5-10 years old'] / pris_report_totals[
+            'Current Incomplete CAT 2'] * 100)
+
+    # Current Incomplete CAT 2 >10 years old
+    count = []
+    for facility in facilities:
+        count.append(len(df[
+                             (df['FAC_NAME'] == facility) & (df['CATEGORY'] == 2) & (df['STATUS'] == 'INCOMPLETE') &
+                             (df['CREATION_DATETIME'] < pd.to_datetime('today') + relativedelta(years=-10))
+                             ]))
+    header_string = 'Current Incomplete CAT 2 >10 years old'
+    pris_report[header_string] = np.array(count)
+    pris_report_totals[header_string] = sum(np.array(count))
+
+
+    # combine dataframe for facilities with dataframe for totals
+    pris_report = pd.concat([pris_report, pris_report_totals], ignore_index=True)
+
+    # remove redundant columns
+    columns_to_drop = ['Current Incomplete CAT 2 w/ Updated Cost & Schedule',
+                       'Current Incomplete CAT 2 5-10 years old',
+                       'Current Incomplete CAT 1',
+                       'Current Incomplete CAT 2',
+                       'Current Incomplete CAT 3']
+    pris_report = pris_report.drop(columns_to_drop, axis=1)
+
+    # excel cell highlight colors
+    green_highlight = '#C6EFCE'
+    red_highlight = '#FFC7CE'
+    yellow_highlight = '#FFEB9C'
+
+    # function for determining conditional formatting colors
+    def highlight_cols(value, lower_threshold, upper_threshold, lower_color, upper_color):
+        if value < lower_threshold:
+            color = lower_color
+        elif lower_threshold <= value <= upper_threshold:
+            color = yellow_highlight
+        else:
+            color = upper_color
+        return 'background-color: ' + color
+
+    # apply conditional formatting
+    pris_report = pris_report.style.applymap(highlight_cols, lower_threshold=1, upper_threshold=3,
+                                             lower_color=green_highlight, upper_color=red_highlight,
+                                             subset='Current % Incomplete CAT 2 5-10 years old') \
+        .applymap(highlight_cols, lower_threshold=75, upper_threshold=90, lower_color=red_highlight,
+                  upper_color=green_highlight, subset='Current % Incomplete CAT 2 w/ Updated Cost & Schedule') \
+        .applymap(highlight_cols, lower_threshold=20, upper_threshold=50, lower_color=green_highlight,
+                  upper_color=red_highlight, subset='Current % Incomplete CAT 2 5-10 years old') \
+        .applymap(highlight_cols, lower_threshold=1, upper_threshold=1, lower_color=green_highlight,
+                  upper_color=red_highlight, subset='Current Incomplete CAT 2 >10 years old') \
+        .applymap(highlight_cols, lower_threshold=1, upper_threshold=0, lower_color=green_highlight,
+                  upper_color=red_highlight,
+                  subset='Current Incomplete CAT 1 > 1 year or missing estimated completion date') \
+        .applymap(highlight_cols, lower_threshold=1, upper_threshold=0, lower_color=green_highlight,
+                  upper_color=yellow_highlight, subset='Current Incomplete CAT 1 w/ expired estimated completion date')
+
+
+
+    # Convert the dataframe to an XlsxWriter Excel object.  Note that we turn off
+    # the default header and skip one row to allow us to insert a user defined
+    # header because xlsxwriter cannot override formatting of dataframe
+    pris_report.to_excel(writer, sheet_name='CURRENT', startrow=1, index=False, header=False)
+
+    # Get the xlsxwriter workbook and worksheet objects.
+    workbook = writer.book
+    worksheet = writer.sheets['CURRENT']
+
+    # format header
+    # couldn't format via applymap_index because formatting options for it are very limited
+    # to get around this, header is omitted when dataframe is exported to excel
+    # and rewritten outside of the pandas dataframe
+    format_header = workbook.add_format({
+        'color': 'white',
+        'bold': True,
+        'text_wrap': True,
+        'valign': 'bottom',
+        'fg_color': '#6099F6',
+        'border': 1})
+
+    # Write the column headers with the defined format.
+    for col_num, value in enumerate(pris_report.columns.values):
+        worksheet.write(0, col_num, value, format_header)
+
+    worksheet.set_column(1, 30, 10)
+
+
