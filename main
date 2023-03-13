@@ -1,0 +1,23 @@
+from sheet_generator import *
+from date_range_gui import *
+from tkinter.filedialog import askopenfilename
+
+#get start and end years for report
+start_year, end_year = get_date_range()
+
+# Create a Pandas Excel writer using XlsxWriter as the engine.
+writer = pd.ExcelWriter("PRIS statistics.xlsx", engine='xlsxwriter')
+
+# get user selection for input file
+input_file = askopenfilename()
+
+
+#generate PRIS statistics sheets for each FY
+for year in range(start_year,end_year+1):
+    generate_fy_sheet(year, input_file, writer)
+
+#generate current PRIS statistics sheet
+generate_current_sheet(input_file, writer)
+
+# Close the Pandas Excel writer and output the Excel file.
+writer.close()
