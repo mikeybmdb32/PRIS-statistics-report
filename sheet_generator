@@ -14,9 +14,9 @@ def serial_to_date(serial):
         return '9/30/' + serial[:4]
 
 # generates excel sheet of PRIS statistics for given fiscal year
-def generate_fy_sheet(fy, input_file, writer):
-    fy_end = datetime(fy, 9, 30, 23, 59, 59)
-    fy_start = datetime(fy - 1, 10, 1)
+def generate_fy_sheet(fy, input_file, writer, facilities):
+    fy_end = datetime(fy, 10, 1, 0, 0, 0)
+    fy_start = datetime(fy - 1, 10, 1, 0, 0, 0)
 
     df = pd.read_csv(input_file)
 
@@ -27,8 +27,7 @@ def generate_fy_sheet(fy, input_file, writer):
     df['STATUS_UPDATE_DATETIME'] = pd.to_datetime(df['STATUS_UPDATE_DATE'], errors='coerce')
     df['TARGET_COMPLETE_DATETIME'] = pd.to_datetime(df['TARGET_COMPLETE_DATE'], errors='coerce')
 
-    # create list of unique facilities and categories for summing/labeling recommendation counts
-    facilities = np.sort(df.FAC_NAME.unique())
+    # create list of unique categories for summing/labeling recommendation counts
     categories = np.sort(df.CATEGORY.unique())
 
     # create empty dataframe PRIS recommendation statistics
@@ -50,14 +49,54 @@ def generate_fy_sheet(fy, input_file, writer):
             count.append(len(df[
                                  ((df['FAC_NAME'] == facility) & (df['CATEGORY'] == category) & (
                                              df['CREATION_DATETIME'] < fy_end)) &
-                                 (((df['ACTUAL_COMPLETE_DATETIME'] != 'NaT') & (
-                                             df['ACTUAL_COMPLETE_DATETIME'] > fy_end)) |
-                                  ((df['ACTUAL_COMPLETE_DATETIME'] == 'NaT') & (df['STATUS'] == 'COMPLETE') & (
-                                              df['STATUS_UPDATE_DATETIME'] > fy_end)) |
-                                  ((df['STATUS'] == 'DELETED') & (df['STATUS_UPDATE_DATETIME'] > fy_end)) |
+                                 (((df['ACTUAL_COMPLETE_DATETIME'].notnull()) & (
+                                             df['ACTUAL_COMPLETE_DATETIME'] >= fy_end)) |
+                                  ((df['ACTUAL_COMPLETE_DATETIME'].isnull()) & (df['STATUS'] == 'COMPLETE') & (
+                                              df['STATUS_UPDATE_DATETIME'] >= fy_end)) |
+                                  ((df['STATUS'] == 'DELETED') & (df['STATUS_UPDATE_DATETIME'] >= fy_end)) |
                                   (df['STATUS'] == 'INCOMPLETE'))
                                  ]))
         header_string = 'Incomplete CAT ' + str(category) + ' @FY End'
+        pris_report[header_string] = np.array(count)
+        pris_report_totals[header_string] = sum(np.array(count))
+
+    # Incomplete > 5 Years Old @ FY Start
+    # 5 year cutoff is from the start of the current FY for the calculation
+    for category in categories:
+        count = []
+        for facility in facilities:
+            count.append(len(df[
+                                 ((df['FAC_NAME'] == facility) & (df['CATEGORY'] == category) & (
+                                             df['CREATION_DATETIME'] < fy_end) & (
+                                             df['CREATION_DATETIME'] < (fy_start - relativedelta(years=5)))) &
+                                 (((df['ACTUAL_COMPLETE_DATETIME'].notnull()) & (
+                                             df['ACTUAL_COMPLETE_DATETIME'] >= fy_end)) |
+                                  ((df['ACTUAL_COMPLETE_DATETIME'].isnull()) & (df['STATUS'] == 'COMPLETE') & (
+                                              df['STATUS_UPDATE_DATETIME'] >= fy_end)) |
+                                  ((df['STATUS'] == 'DELETED') & (df['STATUS_UPDATE_DATETIME'] >= fy_end)) |
+                                  (df['STATUS'] == 'INCOMPLETE'))
+                                 ]))
+        header_string = 'Incomplete CAT ' + str(category) + '> 5 Years Old @FY End'
+        pris_report[header_string] = np.array(count)
+        pris_report_totals[header_string] = sum(np.array(count))
+
+    # Incomplete < 5 Years Old @ FY Start
+    # 5 year cutoff is from the start of the current FY for the calculation
+    for category in categories:
+        count = []
+        for facility in facilities:
+            count.append(len(df[
+                                 ((df['FAC_NAME'] == facility) & (df['CATEGORY'] == category) & (
+                                             df['CREATION_DATETIME'] < fy_end) & (
+                                             df['CREATION_DATETIME'] >= (fy_start - relativedelta(years=5)))) &
+                                 (((df['ACTUAL_COMPLETE_DATETIME'].notnull()) & (
+                                             df['ACTUAL_COMPLETE_DATETIME'] >= fy_end)) |
+                                  ((df['ACTUAL_COMPLETE_DATETIME'].isnull()) & (df['STATUS'] == 'COMPLETE') & (
+                                              df['STATUS_UPDATE_DATETIME'] >= fy_end)) |
+                                  ((df['STATUS'] == 'DELETED') & (df['STATUS_UPDATE_DATETIME'] >= fy_end)) |
+                                  (df['STATUS'] == 'INCOMPLETE'))
+                                 ]))
+        header_string = 'Incomplete CAT ' + str(category) + '< 5 Years Old @FY End'
         pris_report[header_string] = np.array(count)
         pris_report_totals[header_string] = sum(np.array(count))
 
@@ -68,11 +107,11 @@ def generate_fy_sheet(fy, input_file, writer):
             count.append(len(df[
                                  ((df['FAC_NAME'] == facility) & (df['CATEGORY'] == category) & (
                                              df['CREATION_DATETIME'] < fy_start)) &
-                                 (((df['ACTUAL_COMPLETE_DATETIME'] != 'NaT') & (
-                                             df['ACTUAL_COMPLETE_DATETIME'] > fy_start)) |
-                                  ((df['ACTUAL_COMPLETE_DATETIME'] == 'NaT') & (df['STATUS'] == 'COMPLETE') & (
-                                              df['STATUS_UPDATE_DATETIME'] > fy_start)) |
-                                  ((df['STATUS'] == 'DELETED') & (df['STATUS_UPDATE_DATETIME'] > fy_start)) |
+                                 (((df['ACTUAL_COMPLETE_DATETIME'].notnull()) & (
+                                             df['ACTUAL_COMPLETE_DATETIME'] >= fy_start)) |
+                                  ((df['ACTUAL_COMPLETE_DATETIME'].isnull()) & (df['STATUS'] == 'COMPLETE') & (
+                                              df['STATUS_UPDATE_DATETIME'] >= fy_start)) |
+                                  ((df['STATUS'] == 'DELETED') & (df['STATUS_UPDATE_DATETIME'] >= fy_start)) |
                                   (df['STATUS'] == 'INCOMPLETE'))
                                  ]))
         header_string = 'Incomplete CAT ' + str(category) + ' @FY Start'
@@ -86,13 +125,13 @@ def generate_fy_sheet(fy, input_file, writer):
             count.append(len(df[
                                  ((df['FAC_NAME'] == facility) & (df['CATEGORY'] == category) & (
                                              df['CREATION_DATETIME'] < fy_start) &
-                                  (df['TARGET_COMPLETE_DATETIME'] > fy_start) & (
+                                  (df['TARGET_COMPLETE_DATETIME'] >= fy_start) & (
                                               df['TARGET_COMPLETE_DATETIME'] < fy_end)) &
-                                 (((df['ACTUAL_COMPLETE_DATETIME'] != 'NaT') & (
-                                             df['ACTUAL_COMPLETE_DATETIME'] > fy_start)) |
-                                  ((df['ACTUAL_COMPLETE_DATETIME'] == 'NaT') & (df['STATUS'] == 'COMPLETE') & (
-                                              df['STATUS_UPDATE_DATETIME'] > fy_start)) |
-                                  ((df['STATUS'] == 'DELETED') & (df['STATUS_UPDATE_DATETIME'] > fy_start)) |
+                                 (((df['ACTUAL_COMPLETE_DATETIME'].notnull()) & (
+                                             df['ACTUAL_COMPLETE_DATETIME'] >= fy_start)) |
+                                  ((df['ACTUAL_COMPLETE_DATETIME'].isnull()) & (df['STATUS'] == 'COMPLETE') & (
+                                              df['STATUS_UPDATE_DATETIME'] >= fy_start)) |
+                                  ((df['STATUS'] == 'DELETED') & (df['STATUS_UPDATE_DATETIME'] >= fy_start)) |
                                   (df['STATUS'] == 'INCOMPLETE'))
                                  ]))
         header_string = 'Incomplete CAT ' + str(category) + ' @FY Start & Completion Scheduled in FY'
@@ -105,7 +144,7 @@ def generate_fy_sheet(fy, input_file, writer):
         for facility in facilities:
             count.append(len(df[
                                  ((df['FAC_NAME'] == facility) & (df['CATEGORY'] == category)) &
-                                 ((df['CREATION_DATETIME'] > fy_start) & (df['CREATION_DATETIME'] < fy_end))]))
+                                 ((df['CREATION_DATETIME'] >= fy_start) & (df['CREATION_DATETIME'] < fy_end))]))
         header_string = 'CAT ' + str(category) + ' Created in FY'
         pris_report[header_string] = np.array(count)
         pris_report_totals[header_string] = sum(np.array(count))
@@ -116,12 +155,12 @@ def generate_fy_sheet(fy, input_file, writer):
         for facility in facilities:
             count.append(len(df[
                                  ((df['FAC_NAME'] == facility) & (df['CATEGORY'] == category)) &
-                                 ((df['ACTUAL_COMPLETE_DATETIME'] != 'NaT') & (
-                                             df['ACTUAL_COMPLETE_DATETIME'] > fy_start) & (
+                                 (((df['ACTUAL_COMPLETE_DATETIME'].notnull()) & (
+                                             df['ACTUAL_COMPLETE_DATETIME'] >= fy_start) & (
                                               df['ACTUAL_COMPLETE_DATETIME'] < fy_end)) |
-                                 ((df['ACTUAL_COMPLETE_DATETIME'] == 'NaT') & (df['STATUS'] == 'COMPLETE') & (
-                                             df['STATUS_UPDATE_DATETIME'] > fy_start) & (
-                                              df['STATUS_UPDATE_DATETIME'] < fy_end))
+                                 ((df['ACTUAL_COMPLETE_DATETIME'].isnull()) & (df['STATUS'] == 'COMPLETE') & (
+                                             df['STATUS_UPDATE_DATETIME'] >= fy_start) & (
+                                              df['STATUS_UPDATE_DATETIME'] < fy_end)))
                                  ]))
         header_string = 'CAT ' + str(category) + ' Completed in FY'
         pris_report[header_string] = np.array(count)
@@ -133,7 +172,7 @@ def generate_fy_sheet(fy, input_file, writer):
         for facility in facilities:
             count.append(len(df[
                                  ((df['FAC_NAME'] == facility) & (df['CATEGORY'] == category) & (df['STATUS'] == 'DELETED')) &
-                                    ((df['STATUS_UPDATE_DATETIME'] > fy_start) & (df['STATUS_UPDATE_DATETIME'] < fy_end))
+                                    ((df['STATUS_UPDATE_DATETIME'] >= fy_start) & (df['STATUS_UPDATE_DATETIME'] < fy_end))
                                  ]))
         header_string = 'CAT ' + str(category) + ' Deleted in FY'
         pris_report[header_string] = np.array(count)
@@ -171,7 +210,7 @@ def generate_fy_sheet(fy, input_file, writer):
 
     worksheet.set_column(1, 30, 10)
 
-def generate_current_sheet(input_file, writer):
+def generate_current_sheet(input_file, writer, facilities):
 
     df = pd.read_csv(input_file)
 
@@ -182,8 +221,7 @@ def generate_current_sheet(input_file, writer):
     df['STATUS_UPDATE_DATETIME'] = pd.to_datetime(df['STATUS_UPDATE_DATE'], errors='coerce')
     df['TARGET_COMPLETE_DATETIME'] = pd.to_datetime(df['TARGET_COMPLETE_DATE'], errors='coerce')
 
-    # create list of unique facilities and categories for summing/labeling recommendation counts
-    facilities = np.sort(df.FAC_NAME.unique())
+    # create list of unique categories for summing/labeling recommendation counts
     categories = np.sort(df.CATEGORY.unique())
 
     # create empty dataframe PRIS recommendation statistics
@@ -215,7 +253,7 @@ def generate_current_sheet(input_file, writer):
         count.append(len(df[
                              ((df['FAC_NAME'] == facility) & (df['CATEGORY'] == 1) & (df['STATUS'] == 'INCOMPLETE')) &
                              ((df['CREATION_DATETIME'] < (pd.to_datetime('today') + relativedelta(years=-1))) |
-                              (df['TARGET_COMPLETE_DATETIME'] == 'NaT'))
+                              (df['TARGET_COMPLETE_DATETIME'].isnull()))
                              ]))
     header_string = 'Current Incomplete CAT 1 > 1 year or missing estimated completion date'
     pris_report[header_string] = np.array(count)
@@ -237,7 +275,7 @@ def generate_current_sheet(input_file, writer):
     for facility in facilities:
         count.append(len(df[
                              (df['FAC_NAME'] == facility) & (df['CATEGORY'] == 2) & (df['STATUS'] == 'INCOMPLETE') &
-                             (df['EST_COMP_COST'] != 'nan') & (df['TARGET_COMPLETE_DATETIME'] != 'NaT') & (
+                             (df['EST_COMP_COST'].notnull()) & (df['TARGET_COMPLETE_DATETIME'].notnull()) & (
                                          df['TARGET_COMPLETE_DATETIME'] > pd.to_datetime('today'))
                              ]))
     header_string = 'Current Incomplete CAT 2 w/ Updated Cost & Schedule'
@@ -258,8 +296,8 @@ def generate_current_sheet(input_file, writer):
     for facility in facilities:
         count.append((len(df[
                               (df['FAC_NAME'] == facility) & (df['CATEGORY'] == 2) & (df['STATUS'] == 'INCOMPLETE') &
-                              (df['CREATION_DATETIME'] < pd.to_datetime('today') + relativedelta(years=-5)) &
-                              (df['CREATION_DATETIME'] > pd.to_datetime('today') + relativedelta(years=-10))
+                              (df['CREATION_DATETIME'] <= pd.to_datetime('today') + relativedelta(years=-5)) &
+                              (df['CREATION_DATETIME'] >= pd.to_datetime('today') + relativedelta(years=-10))
                               ])))
     header_string = 'Current Incomplete CAT 2 5-10 years old'
     pris_report[header_string] = np.array(count)
@@ -355,5 +393,3 @@ def generate_current_sheet(input_file, writer):
         worksheet.write(0, col_num, value, format_header)
 
     worksheet.set_column(1, 30, 10)
-
-
