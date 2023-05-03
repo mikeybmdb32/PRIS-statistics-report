@@ -1,0 +1,26 @@
+#this function prompts the user for and outputs a date range, consisting of a start year and end year
+from easygui import *
+import datetime
+def get_date_range():
+    current_year = datetime.date.today().year
+
+    # message to be displayed
+    text = "Please enter the 4-digit fiscal years for report range (example: 2023)."
+
+    # window title
+    title = "PRIS Report Date Range"
+
+    # list of multiple inputs
+    input_list = ["Start", "End"]
+
+    # list of default text
+    default_list = [current_year-5, current_year]
+
+    # creating a integer box
+    output = multenterbox(text, title, input_list, default_list)
+    while len(output[0]) != 4 or not output[0].isnumeric() or len(output[0]) != 4 or not output[0].isnumeric():
+        text = "Invalid Input.\nPlease enter the 4-digit fiscal years for report range (example: 2023)."
+        # creating a integer box
+        output = multenterbox(text, title, input_list, default_list)
+
+    return int(output[0]), int(output[1])
