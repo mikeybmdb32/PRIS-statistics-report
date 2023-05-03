@@ -1,0 +1,53 @@
+import tkinter as tk
+
+class OptionGUI:
+    def __init__(self, options, default_selections=None):
+        self.options = options
+        self.selected_options = []
+
+        self.root = tk.Tk()
+        self.root.title("Select Facilities for Report")
+        self.root.geometry("400x300")
+
+        # Create listbox and populate with options
+        self.listbox = tk.Listbox(self.root, selectmode=tk.MULTIPLE)
+        for option in self.options:
+            self.listbox.insert(tk.END, option)
+
+        # Set default selections, if provided
+        if default_selections:
+            for option in default_selections:
+                try:
+                    index = self.options.index(option)
+                    self.listbox.selection_set(index)
+                except ValueError:
+                    pass
+
+        # Create "Select All" button
+        self.select_all_button = tk.Button(self.root, text="Select All", command=self.select_all)
+
+        # Create "Deselect All" button
+        self.deselect_all_button = tk.Button(self.root, text="Deselect All", command=self.deselect_all)
+
+        # Create "Done" button
+        self.done_button = tk.Button(self.root, text="Done", command=self.done)
+
+        # Pack widgets
+        self.listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.select_all_button.pack(side=tk.TOP, padx=5, pady=5)
+        self.deselect_all_button.pack(side=tk.TOP, padx=5, pady=5)
+        self.done_button.pack(side=tk.BOTTOM, padx=5, pady=5)
+
+        # Start GUI
+        self.root.mainloop()
+
+    def select_all(self):
+        self.listbox.selection_set(0, tk.END)
+
+    def deselect_all(self):
+        self.listbox.selection_clear(0, tk.END)
+
+    def done(self):
+        self.selected_options = [self.options[index] for index in self.listbox.curselection()]
+        self.root.destroy()
+
